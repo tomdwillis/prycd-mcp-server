@@ -5,14 +5,17 @@ import express from "express";
 
 import { registerCompTools } from "./tools/comps.js";
 
-const server = new McpServer({
-  name: "prycd-mcp-server",
-  version: "1.0.0",
-});
-
-registerCompTools(server);
+function createServer(): McpServer {
+  const server = new McpServer({
+    name: "prycd-mcp-server",
+    version: "1.0.0",
+  });
+  registerCompTools(server);
+  return server;
+}
 
 async function runStdio(): Promise<void> {
+  const server = createServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("Prycd MCP server running on stdio");
@@ -91,13 +94,25 @@ async function runHTTP(): Promise<void> {
   });
 
   app.post("/mcp", async (req, res) => {
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-      enableJsonResponse: true,
-    });
-    res.on("close", () => transport.close());
-    await server.connect(transport);
-    await transport.handleRequest(req, res, req.body);
+    try {
+      const server = createServer();
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: undefined,
+        enableJsonResponse: true,
+      });
+      res.on("close", () => transport.close());
+      await server.connect(transport);
+      await transport.handleRequest(req, res, req.body);
+    } catch (err) {
+      console.error("MCP request error:", err);
+      if (!res.headersSent) {
+        res.status(500).json({
+          jsonrpc: "2.0",
+          error: { code: -32603, message: "Internal server error" },
+          id: null,
+        });
+      }
+    }
   });
 
   app.get("/mcp", (_req, res) => {
